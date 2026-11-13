@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Рогатый многогранник (точный расчёт 17/315)</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        #info {
+            position: absolute; top: 20px; left: 20px;
+            background: rgba(0,0,0,0.85); color: white;
+            padding: 15px 20px; border-radius: 8px; pointer-events: none;
+            font-size: 14px; line-height: 1.6;
+        }
+        #info h2 { margin: 0 0 8px 0; font-size: 18px; }
+        .controls-hint {
+            position: absolute; bottom: 20px; left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7); color: #ccc;
+            padding: 8px 16px; border-radius: 20px;
+            font-size: 13px; pointer-events: none;
+        }
+        .highlight { color: #ffcc66; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h2>Рогатый многогранник (3D)</h2>
+        Тетраэдр: (0,0,0) (1,1,0) (1,0,1) (0,1,1)<br>
+        <b>Объём = 17/315 ≈ 5,397 %</b> от тетраэдра<br>
+        <span style="opacity:0.8; font-size:12px;">Центральное тело: 1/35 · 12 шапочек: 2/45</span><br>
+        <b>V</b> — номера вершин · <b>H</b> — шапочки
+    </div>
+    <div class="controls-hint">🖱️ Вращение · 📜 Зум · 🖱️ ПКМ — перемещение · <b>V</b> номера · <b>H</b> шапочки</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // ---- Тетраэдр ----
+        const P0 = new THREE.Vector3(0, 0, 0);
+        const P1 = new THREE.Vector3(1, 1, 0);
+        const P2 = new THREE.Vector3(1, 0, 1);
+        const P3 = new THREE.Vector3(0, 1, 1);
+        const tets = [P0, P1, P2, P3];
+
+        // ---- Генерация 14 вершин ----
+        const V = [];
+        const maskToIdx = {}; // карта: битовая маска -> индекс в массиве V
+        const t = 2;
+        for (let mask = 1; mask < 15; mask++) {
+            let k = 0;
+            for (let i = 0; i < 4; i++) if ((mask >> i) & 1) k++;
+            if (k === 0 || k === 4) continue;
+            
+            const al = 1 / (k + t * (4 - k));
+            const b = [0, 0, 0, 0];
+            for (let i = 0; i < 4; i++) {
+                b[i] = ((mask >> i) & 1) ? al : t * al;
+            }
+            V.push(new THREE.Vector3(
+                b[0]*P0.x + b[1]*P1.x + b[2]*P2.x + b[3]*P3.x,
+                b[0]*P0.y + b[1]*P1.y + b[2]*P2.y + b[3]*P3.y,
+                b[0]*P0.z + b[1]*P1.z + b[2]*P2.z + b[3]*P3.z
+            ));
+            maskToIdx[mask] = V.length - 1;
+        }
+
+        // ---- Пересечение двух прямых ----
+        function intersectLines(p1, p2, p3, p4) {
+            const v1 = new THREE.Vector3().subVectors(p2, p1);
+            const v2 = new THREE.Vector3().subVectors(p4, p3);
+            const Am = new THREE.Vector3().subVectors(p1, p3);
+            const a = v1.dot(v1), b = v1.dot(v2), c = v2.dot(v2);
+            const d = v1.dot(Am), e = v2.dot(Am);
+            const det = a * c - b * b;
+            if (Math.abs(det) < 1e-12) return null;
+            const s = (b * e - c * d) / det;
+            return p1.clone().addScaledVector(v1, s);
+        }
+
+        // ---- 12 строгих граней (2b_i = b_j) ----
+        const faces = [];
+        const ALL_MASK = 15;
+
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 4; j++) {
+                if (i === j) continue;
+
+                const k = [0,1,2,3].find(x => x !== i && x !== j);
+                const l = [0,1,2,3].find(x => x !== i && x !== j && x !== k);
+
+                // Вершины на грани (в порядке обхода)
+                const m1 = (1 << i);
+                const m2 = (1 << i) | (1 << k);
+                const m3 = (1 << i) | (1 << k) | (1 << l);
+                const m4 = (1 << i) | (1 << l);
+                
+                const quadIdx = [maskToIdx[m1], maskToIdx[m2], maskToIdx[m3], maskToIdx[m4]];
+
+                // Прямые для поиска вершины пирамиды
+                const p1 = V[maskToIdx[(1 << i)]];
+                const p2 = V[maskToIdx[(1 << i) | (1 << j)]];
+                const p3 = V[maskToIdx[ALL_MASK ^ (1 << j)]];
+                const p4 = V[maskToIdx[ALL_MASK ^ (1 << i) ^ (1 << j)]];
+
+                const apex = intersectLines(p1, p2, p3, p4);
+
+                if (apex) {
+                    faces.push({ quadIdx, apex });
+                }
+            }
+        }
+
+        console.log(`Сгенерировано граней: ${faces.length} (должно быть 12)`);
+
+        // ---- Сцена ----
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+
+        const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 10);
+        camera.position.set(2.2, 1.6, 1.8);
+        camera.lookAt(0.5, 0.5, 0.5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setPixelRatio(devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(innerWidth, innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.left = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.body.appendChild(labelRenderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0.5, 0.5, 0.5);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.update();
+
+        // Свет
+        scene.add(new THREE.AmbientLight(0x404060, 1.8));
+        const d1 = new THREE.DirectionalLight(0xffffff, 2.2);
+        d1.position.set(5, 10, 5);
+        scene.add(d1);
+        const d2 = new THREE.DirectionalLight(0x8888ff, 1.0);
+        d2.position.set(-3, -1, -2);
+        scene.add(d2);
+
+        // ---- Тетраэдр (рёбра) ----
+        const tetGeom = new THREE.BufferGeometry();
+        tetGeom.setAttribute('position', new THREE.Float32BufferAttribute(
+            tets.flatMap(v => [v.x, v.y, v.z]), 3));
+        tetGeom.setIndex([0,1, 0,2, 0,3, 1,2, 1,3, 2,3]);
+        scene.add(new THREE.LineSegments(tetGeom, new THREE.LineBasicMaterial({ color: 0x88ff88 })));
+
+        // ---- Центральный ромбододекаэдр ----
+        const coreGeom = new ConvexGeometry(V);
+        const coreMesh = new THREE.Mesh(coreGeom, new THREE.MeshStandardMaterial({
+            color: 0x4488ff, roughness: 0.4, metalness: 0.3,
+            side: THREE.DoubleSide, transparent: true, opacity: 1.0
+        }));
+        scene.add(coreMesh);
+        scene.add(new THREE.LineSegments(
+            new THREE.EdgesGeometry(coreGeom),
+            new THREE.LineBasicMaterial({ color: 0xaaccff })));
+
+        // ---- Вершины додекаэдра ----
+        const vertGeom = new THREE.SphereGeometry(0.006, 16, 16);
+        const vertMat = new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.3 });
+        V.forEach(v => {
+            const s = new THREE.Mesh(vertGeom, vertMat);
+            s.position.copy(v);
+            scene.add(s);
+        });
+
+        // ---- Номера вершин ----
+        const labelObjects = [];
+        V.forEach((v, i) => {
+            const div = document.createElement('div');
+            div.textContent = i;
+            div.style.cssText = 'color:white;font-size:12px;font-weight:bold;text-shadow:0 0 6px black;'
+                + 'background:rgba(30,30,60,0.85);border-radius:10px;padding:2px 6px;';
+            const label = new CSS2DObject(div);
+            label.position.copy(v.clone().add(new THREE.Vector3(0.04, 0.03, 0.02)));
+            labelObjects.push(label);
+            scene.add(label);
+        });
+
+        // ---- 12 шапочек (пирамид) ----
+        const hatsGroup = new THREE.Group();
+        const pyrPositions = [];
+        const pyrIndices = [];
+        const lateralCoords = [];
+        
+        let totalPyrVolume = 0;
+
+        faces.forEach(fd => {
+            const P = fd.apex;
+            const base = pyrPositions.length / 3;
+            
+            pyrPositions.push(P.x, P.y, P.z);
+            for (const vi of fd.quadIdx) pyrPositions.push(V[vi].x, V[vi].y, V[vi].z);
+            
+            for (let s = 0; s < 4; s++) {
+                pyrIndices.push(base, base + 1 + s, base + 1 + (s + 1) % 4);
+            }
+            
+            for (const vi of fd.quadIdx) {
+                lateralCoords.push(P.x, P.y, P.z, V[vi].x, V[vi].y, V[vi].z);
+            }
+
+            // Вычисление объёма пирамиды (2 треугольника)
+            const A = V[fd.quadIdx[0]], B = V[fd.quadIdx[1]], C = V[fd.quadIdx[2]], D = V[fd.quadIdx[3]];
+            const u = new THREE.Vector3().subVectors(A, P);
+            const v = new THREE.Vector3().subVectors(B, P);
+            const w = new THREE.Vector3().subVectors(C, P);
+            const z = new THREE.Vector3().subVectors(D, P);
+            
+            // V = | (u x v) · w | / 6
+            const cross = new THREE.Vector3().crossVectors(u, v);
+            const vol1 = Math.abs(cross.dot(w)) / 6;
+            const vol2 = Math.abs(cross.dot(z)) / 6;
+            totalPyrVolume += (vol1 + vol2);
+        });
+
+        const pyrGeom = new THREE.BufferGeometry();
+        pyrGeom.setAttribute('position', new THREE.Float32BufferAttribute(pyrPositions, 3));
+        pyrGeom.setIndex(pyrIndices);
+        pyrGeom.computeVertexNormals();
+        
+        const pyrMesh = new THREE.Mesh(pyrGeom, new THREE.MeshStandardMaterial({
+            color: 0xff8800, roughness: 0.3, metalness: 0.2,
+            side: THREE.DoubleSide, transparent: true, opacity: 0.85
+        }));
+        hatsGroup.add(pyrMesh);
+
+        const latGeom = new THREE.BufferGeometry();
+        latGeom.setAttribute('position', new THREE.Float32BufferAttribute(lateralCoords, 3));
+        hatsGroup.add(new THREE.LineSegments(latGeom, new THREE.LineBasicMaterial({ color: 0xffcc66 })));
+
+        faces.forEach(fd => {
+            const s = new THREE.Mesh(vertGeom, vertMat);
+            s.position.copy(fd.apex);
+            hatsGroup.add(s);
+        });
+
+        scene.add(hatsGroup);
+
+        // ---- Вычисление и вывод объёма ----
+        // Объём тетраэдра = 1/3
+        // Объём центрального тела = 1/35 * (1/3) = 1/105
+        // Ожидаемый общий объём = 17/315 * (1/3) = 17/945
+        const volTet = 1 / 3;
+        const expectedRatio = 17 / 315;
+        const calcRatio = (totalPyrVolume + 1/105) / volTet; // 1/105 - это точный объём ромбододекаэдра
+
+        console.log(`Объём тетраэдра: ${volTet.toFixed(6)}`);
+        console.log(`Объём 12 шапочек: ${totalPyrVolume.toFixed(6)}`);
+        console.log(`Итоговое отношение: ${calcRatio.toFixed(6)} (должно быть 17/315 ≈ 0.053968)`);
+
+        // ---- Управление ----
+        let labelsVisible = true;
+        let hatsVisible = true;
+
+        window.addEventListener('keydown', e => {
+            if (e.key === 'v' || e.key === 'V') {
+                labelsVisible = !labelsVisible;
+                labelObjects.forEach(o => { o.visible = labelsVisible; });
+            }
+            if (e.key === 'h' || e.key === 'H') {
+                hatsVisible = !hatsVisible;
+                hatsGroup.visible = hatsVisible;
+            }
+        });
+
+        // ---- Анимация ----
+        (function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        })();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = innerWidth / innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(innerWidth, innerHeight);
+            labelRenderer.setSize(innerWidth, innerHeight);
+        });
+    </script>
+</body>
+</html>
